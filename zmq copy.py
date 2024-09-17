@@ -18,7 +18,8 @@ import datetime
 import time
 from collections import deque
 
-zmq_delimiter = "_!_"
+# zmq_delimiter = "_!_"
+zmq_delimiter = " "
 
 
 class ReaderSingleton(retico_core.AbstractModule):
@@ -37,6 +38,10 @@ class ReaderSingleton(retico_core.AbstractModule):
         return "A Module providing reading from a ZeroMQ bus"
 
     @staticmethod
+    def input_ius():
+        return [IncrementalUnit]
+
+    @staticmethod
     def output_iu():
         return IncrementalUnit
 
@@ -51,6 +56,7 @@ class ReaderSingleton(retico_core.AbstractModule):
         self.target_iu_types = {}
         self.socket = zmq.Context().socket(zmq.SUB)
         self.socket.connect("tcp://{}:{}".format(ip, port))
+        # self.socket.connect("tcp://localhost:5555")
 
     def process_update(self, input_iu):
         """
@@ -59,7 +65,8 @@ class ReaderSingleton(retico_core.AbstractModule):
         return None
 
     def add(self, topic, target_iu_type):
-        self.socket.subscribe(topic)
+        # self.socket.subscribe(topic)
+        self.socket.setsockopt_string(zmq.SUBSCRIBE, topic)
         self.target_iu_types[topic] = target_iu_type
 
     def run_process(self):
@@ -84,7 +91,8 @@ class ReaderSingleton(retico_core.AbstractModule):
                 self.iu_counter += 1
                 self._previous_iu = output_iu
 
-                output_iu.from_zmq(j)
+                # output_iu.from_zmq(j)
+                output_iu.payload = j["payload"]
 
                 update_message = retico_core.UpdateMessage()
 
@@ -102,8 +110,16 @@ class ReaderSingleton(retico_core.AbstractModule):
     def run_reader(self):
         # print(self.topic)
         while True:
-            topic, message = self.socket.recv_string().split(zmq_delimiter)
-            self.queue.append((topic, message))
+            time.sleep(0.2)
+            # topic, message = self.socket.recv_string().split(zmq_delimiter)
+            # message = self.socket.recv_multipart()
+            # print(f"Received: {message}")
+
+            string = self.socket.recv()
+            string = string.decode("utf-8")
+            sstring = string.split()
+            topic, message = sstring[0], " ".join(sstring[1:])
+            self.queue.append(("test", message))
 
     def prepare_run(self):
         t = threading.Thread(target=self.run_reader)
@@ -127,6 +143,7 @@ class WriterSingleton:
             self.queue = deque()
             self.socket = context.socket(zmq.PUB)
             self.socket.bind("tcp://{}:{}".format(ip, port))
+            # self.socket.bind("tcp://*:5555")
             WriterSingleton.__instance = self
             t = threading.Thread(target=self.run_writer)
             t.start()
@@ -319,10 +336,14 @@ class ZeroMQWriter(retico_core.AbstractModule):
         """
         # print("ZMQ Writer process update", self.topic)
         for input_iu, um in update_message:
-            self.writer.send(
-                self.topic + zmq_delimiter + json.dumps(input_iu.to_zmq(um))
-            )
-            # time.sleep(0.1)
+
+            dict = {}
+            dict["payload"] = input_iu.__dict__["payload"]
+            dict["update_type"] = str(um)
+            print("dict = ", dict)
+            self.writer.send(f"{self.topic} {json.dumps(dict, indent=len(dict))}")
+
+            self.writer.send("/topic/DEFAULT_SCOPE/vrExpress vrWEFUI start")
 
         return None
         # for um in update_message:
